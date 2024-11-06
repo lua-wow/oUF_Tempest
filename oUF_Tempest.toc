@@ -1,0 +1,12 @@
+## Interface: 110005
+## Author: Luaerror
+## Version: 0.1.0
+## Title: oUF Tempest
+## Notes: Shaman Enhancement Tempest tracker support for oUF layouts.
+## IconTexture: Interface\ICONS\Inv_ability_stormcallershaman_tempest
+## RequiredDeps: oUF
+
+## X-Maintainer: Luaerror
+## X-Website: https://github.com/lua-wow/oUF_Tempest
+
+oUF_Tempest.lua
