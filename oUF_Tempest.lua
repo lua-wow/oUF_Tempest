@@ -35,6 +35,8 @@ local oUF = ns.oUF
 -- Blizzard
 local UnitClass = _G.UnitClass
 local UnitGUID = _G.UnitGUID
+local IsSpellKnown = _G.IsSpellKnown
+local IsPlayerSpell = _G.IsPlayerSpell
 
 -- Mine
 local _, class = UnitClass("player")
@@ -53,21 +55,22 @@ local SPENDERS = {
     [117014] = true, -- Elemental Blast
     [188196] = true, -- Lightning Bolt
     [188443] = true, -- Chain Lightning
-    [320674] = false -- Chain Harvest (Venthyr Covenant Ability)
+    [320674] = false, -- Chain Harvest (Venthyr Covenant Ability)
     [452201] = true, -- Tempest
 }
 
 local COMBAT_EVENTS = {
-    ["SPELL_AURA_APPLIED"] = true,
-    ["SPELL_AURA_APPLIED_DOSE"] = true,
-    ["SPELL_AURA_REMOVED"] = true,
-    ["SPELL_AURA_REMOVED_DOSE"] = true,
-    ["SPELL_AURA_REFRESH"] = true,
+    ["SPELL_AURA_APPLIED"] = true,			-- auraType, amount
+    ["SPELL_AURA_APPLIED_DOSE"] = true,		-- auraType, amount
+    ["SPELL_AURA_REMOVED"] = true,			-- auraType, amount
+    ["SPELL_AURA_REMOVED_DOSE"] = true,		-- auraType, amount
+    ["SPELL_AURA_REFRESH"] = true,			-- auraType, #amount (amount is missing)
     ["SPELL_CAST_SUCCESS"] = true,
 }
 
 local function UpdateColor(self, event, unit)
-	-- if (unit and unit ~= self.unit) then return end
+	if (unit and unit ~= self.unit) then return end
+
 	local element = self.Tempest
 
 	local color = self.colors.power[Enum.PowerType.Maelstrom or 11]
@@ -94,61 +97,37 @@ local function UpdateColor(self, event, unit)
 	end
 end
 
-local function Update(self, event, unit)
+local function Update(self, event, unit, ...)
     local element = self.Tempest
+	
+	if (unit == self.unit) then
+		if event == "UNIT_AURA" then
+			local updateInfo = ...
 
-    if event == "COMBAT_LOG_EVENT_UNFILTERED" then
-        local timestamp, subevent, hideCaster, sourceGUID, sourceName, sourceFlags, sourceRaidFlags, destGUID, destName, destFlags, destRaidFlags = CombatLogGetCurrentEventInfo()
+			-- https://www.wowhead.com/spell=462131/awakening-storms
+			local asInfo = C_UnitAuras.GetPlayerAuraBySpellID(462131)
+			element.awakening_storms = asInfo and asInfo.applications or 0
 
-        -- filter events
-        if not COMBAT_EVENTS[subevent] then return end
-        
-        -- watch only sevent casted by the player
-        if sourceGUID ~= element.guid then return end
+			-- https://www.wowhead.com/spell=344179/maelstrom-weapon
+			local mwInfo = C_UnitAuras.GetPlayerAuraBySpellID(MAELSTROM_WEAPON)
+			element.value = mwInfo and mwInfo.applications or 0
+			
+			-- https://www.wowhead.com/spell=454015/tempest
+			local tempestInfo = C_UnitAuras.GetPlayerAuraBySpellID(TEMPEST)
+			element.tempest = tempestInfo and tempestInfo.applications or 0
+		elseif event == "UNIT_SPELLCAST_SUCCEEDED" then
+			local guid, spellID = ...
+			
+			if SPENDERS[spellID] then
+				element.total = element.total - element.value
+				if element.total <= 0 then
+					element.total = element.total + element.threshold
+				end
 
-        local spellID, spellName, spellSchool, auraType, amount = select(12, CombatLogGetCurrentEventInfo())
-        
-        local changed = false
-        if (subevent == "SPELL_AURA_APPLIED" or subevent == "SPELL_AURA_APPLIED_DOSE") then
-            if spellID == MAELSTROM_WEAPON then
-                element.value = (amount or 1)
-                changed = true
-            elseif spellID == TEMPEST then
-                element.tempest = (amount or 1)
-                changed = true
-            end
-        elseif (subevent == "SPELL_AURA_REMOVED" or subevent == "SPELL_AURA_REMOVED_DOSE") then
-            if spellID == MAELSTROM_WEAPON then
-                element.value = (amount or 1)
-                changed = true
-            elseif spellID == TEMPEST then
-                element.tempest = (amount or 1)
-                changed = true
-            end
-        elseif subevent == "SPELL_AURA_REFRESH" and spellID == MAELSTROM_WEAPON then
-            changed = true
-        elseif subevent == "SPELL_CAST_SUCCESS" and SPENDERS[spellID] then
-			element.total = element.total - element.value
-			if element.total <= 0 then
-				element.total = element.total + element.threshold
+				element.last_update = GetTime()
 			end
-			element.last_update = GetTime()
-			change = true
-        end
-    else
-		-- https://www.wowhead.com/spell=462131/awakening-storms
-        local asInfo = C_UnitAuras.GetPlayerAuraBySpellID(462131)
-		local awakeningStorms = asInfo and asInfo.applications or 0
-
-		-- https://www.wowhead.com/spell=344179/maelstrom-weapon
-		local mwInfo = C_UnitAuras.GetPlayerAuraBySpellID(MAELSTROM_WEAPON)
-        -- local maelstormWeapon = mwInfo and mwInfo.applications or 0
-		element.value = mwInfo and mwInfo.applications or 0
-		
-		-- https://www.wowhead.com/spell=454015/tempest
-		local mwInfo = C_UnitAuras.GetPlayerAuraBySpellID(TEMPEST)
-		element.tempest = mwInfo and mwInfo.applications or 0
-    end
+		end
+	end
 
 	--[[ Callback: Tempest:PreUpdate()
 	Called before the element has been updated.
@@ -159,12 +138,8 @@ local function Update(self, event, unit)
 		element:PreUpdate()
 	end
 
-    if element.Value then
-        element.Value:SetFormattedText("%d / %d / %d (%d)", element.value, element.total, element.threshold, element.tempest)
-    end
-	
-	element:SetMinMaxValues(0, element.threshold)
-    element:SetValue(element.value + element.total)
+	element:SetMinMaxValues(0, element.max)
+	element:SetValue(element.value)
 
 	--[[ Callback: Tempest:PostUpdate(cur, max)
 	Called after the element has been updated.
@@ -199,15 +174,18 @@ end
 local function Visibility(self, event, unit)
     local element = self.Tempest
     local spec = GetSpecialization()
-	if (spec ~= SPEC_SHAMAN_ENHANCEMENT or UnitHasVehiclePlayerFrameUI("player")) then
+	local isTempestKnown = IsPlayerSpell(454009) -- check Tempest talent
+	if (spec ~= SPEC_SHAMAN_ENHANCEMENT or UnitHasVehiclePlayerFrameUI("player") or not isTempestKnown) then
 		if element:IsShown() then
 			element:Hide()
-			self:UnregisterEvent("COMBAT_LOG_EVENT_UNFILTERED", Path)
+			self:UnregisterEvent("UNIT_AURA", Path)
+			self:UnregisterEvent("UNIT_SPELLCAST_SUCCEEDED", Path)
 		end
 	else
 		if not element:IsShown() then
 			element:Show()
-			self:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED", Path, true)
+			self:RegisterEvent("UNIT_AURA", Path)
+			self:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED", Path)
 		end
 
 		Path(self, event, unit)
@@ -237,19 +215,18 @@ local function Enable(self, unit)
 		
 		-- variables
         element.guid = UnitGUID("player")
-		element.threshold = 40 -- number of 'Maelstorm Weapon' necessary to spend to turn 'Lightning Bold' into 'Tempest'
-		element.value = 0 -- number of stacks of 'Maelstorm Weapon'
-		element.total = element.threshold -- number of stacks of 'Maelstorm Weapon' spend
-		element.tempest = 0 -- number of stacks of 'Tempest'
+		element.value = 0					-- current number of 'Maelstorm Weapon' stacks
+		element.max = 10					-- maximum number of 'Maelstorm Weapon' stacks
+		element.threshold = 40				-- number of 'Maelstorm Weapon' necessary to spend to turn 'Lightning Bold' into 'Tempest'
+		element.total = element.threshold	-- number of stacks of 'Maelstorm Weapon' spend
+		element.tempest = 0					-- current number of 'Tempest' stacks
 		element.last_update = 0
 
+		self:RegisterEvent("SPELLS_CHANGED", VisibilityPath, true)
 		self:RegisterEvent("PLAYER_TALENT_UPDATE", VisibilityPath, true)
 
-		if element:IsObjectType("StatusBar") then
-            element:SetMinMaxValues(0, 40)
-            if not element:GetStatusBarTexture() then
-			    element:SetStatusBarTexture([[Interface\TargetingFrame\UI-StatusBar]])
-            end
+		if element:IsObjectType("StatusBar") and not element:GetStatusBarTexture() then
+			element:SetStatusBarTexture([[Interface\TargetingFrame\UI-StatusBar]])
 		end
 
 		-- do not change this without taking Visibility into account
@@ -264,7 +241,9 @@ local function Disable(self)
 	if element then
 		element:Hide()
 
-		self:UnregisterEvent("COMBAT_LOG_EVENT_UNFILTERED", Path)
+		self:UnregisterEvent("UNIT_AURA", Path)
+		self:UnregisterEvent("UNIT_SPELLCAST_SUCCEEDED", Path)
+		self:UnregisterEvent("SPELLS_CHANGED", VisibilityPath)
 		self:UnregisterEvent("PLAYER_TALENT_UPDATE", VisibilityPath)
 	end
 end
