@@ -45,6 +45,7 @@ if (class ~= "SHAMAN") then return end
 local SPEC_SHAMAN_ENHANCEMENT = _G.SPEC_SHAMAN_ENHANCEMENT or 2
 
 local AWAKENING_STORMS = 462131
+-- local AWAKENING_STORMS = 455130
 local MAELSTROM_WEAPON = 344179
 local TEMPEST = 454015
 
@@ -57,6 +58,7 @@ local SPENDERS = {
     [188443] = true, -- Chain Lightning
     [320674] = false, -- Chain Harvest (Venthyr Covenant Ability)
     [452201] = true, -- Tempest
+    [1218090] = true, -- Primordial Storm
 }
 
 local COMBAT_EVENTS = {
@@ -105,7 +107,7 @@ local function Update(self, event, unit, ...)
 			local updateInfo = ...
 
 			-- https://www.wowhead.com/spell=462131/awakening-storms
-			local asInfo = C_UnitAuras.GetPlayerAuraBySpellID(462131)
+			local asInfo = C_UnitAuras.GetPlayerAuraBySpellID(AWAKENING_STORMS)
 			element.awakening_storms = asInfo and asInfo.applications or 0
 
 			-- https://www.wowhead.com/spell=344179/maelstrom-weapon
@@ -217,7 +219,7 @@ local function Enable(self, unit)
         element.guid = UnitGUID("player")
 		element.value = 0					-- current number of 'Maelstorm Weapon' stacks
 		element.max = 10					-- maximum number of 'Maelstorm Weapon' stacks
-		element.threshold = 40				-- number of 'Maelstorm Weapon' necessary to spend to turn 'Lightning Bold' into 'Tempest'
+		element.threshold = 40				-- every 40 'Maelstorm Weapon' stacks spent replaces your next 'Lightning Bold' with 'Tempest'
 		element.total = element.threshold	-- number of stacks of 'Maelstorm Weapon' spend
 		element.tempest = 0					-- current number of 'Tempest' stacks
 		element.last_update = 0
