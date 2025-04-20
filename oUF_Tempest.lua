@@ -44,30 +44,46 @@ if (class ~= "SHAMAN") then return end
 
 local SPEC_SHAMAN_ENHANCEMENT = _G.SPEC_SHAMAN_ENHANCEMENT or 2
 
-local AWAKENING_STORMS = 462131
--- local AWAKENING_STORMS = 455130
-local MAELSTROM_WEAPON = 344179
-local TEMPEST = 454015
-
-local SPENDERS = {
-    [1064] = true, -- Chain Heal
-    [8004] = true, -- Healing Surge
-    [51505] = true, -- Lava Burst
-    [117014] = true, -- Elemental Blast
-    [188196] = true, -- Lightning Bolt
-    [188443] = true, -- Chain Lightning
-    [320674] = false, -- Chain Harvest (Venthyr Covenant Ability)
-    [452201] = true, -- Tempest
-    [1218090] = true, -- Primordial Storm
+local Talents = {
+	Tempest = 454009,
+	-- AwakeningStorms = 455130
 }
 
-local COMBAT_EVENTS = {
-    ["SPELL_AURA_APPLIED"] = true,			-- auraType, amount
-    ["SPELL_AURA_APPLIED_DOSE"] = true,		-- auraType, amount
-    ["SPELL_AURA_REMOVED"] = true,			-- auraType, amount
-    ["SPELL_AURA_REMOVED_DOSE"] = true,		-- auraType, amount
-    ["SPELL_AURA_REFRESH"] = true,			-- auraType, #amount (amount is missing)
-    ["SPELL_CAST_SUCCESS"] = true,
+local Auras = {
+	AwakeningStorms = 462131,
+	MaelstromWeapon = 344179,
+	Tempest = 454015
+}
+
+local Spells = {
+	ChainHeal = 1064,
+	HealingSurge = 8004,
+	LavaBurst = 51505,
+	ElementalBlast = 117014,
+	LightningBolt = 188196,
+	ChainLightning = 188443,
+	Tempest = 452201,
+	PrimordialStorm = 1218090
+}
+
+local Spenders = {
+	[Spells.ChainHeal] = true, -- Chain Heal
+	[Spells.HealingSurge] = true, -- Healing Surge
+	[Spells.LavaBurst] = true, -- Lava Burst
+	[Spells.ElementalBlast] = true, -- Elemental Blast
+	[Spells.LightningBolt] = true, -- Lightning Bolt
+	[Spells.ChainLightning] = true, -- Chain Lightning
+	[Spells.Tempest] = true, -- Tempest
+	[Spells.PrimordialStorm] = true, -- Primordial Storm
+}
+
+local CombatEvents = {
+	["SPELL_AURA_APPLIED"] = true,			-- auraType, amount
+	["SPELL_AURA_APPLIED_DOSE"] = true,		-- auraType, amount
+	["SPELL_AURA_REMOVED"] = true,			-- auraType, amount
+	["SPELL_AURA_REMOVED_DOSE"] = true,		-- auraType, amount
+	["SPELL_AURA_REFRESH"] = true,			-- auraType, #amount (amount is missing)
+	["SPELL_CAST_SUCCESS"] = true,
 }
 
 local function UpdateColor(self, event, unit)
@@ -99,37 +115,122 @@ local function UpdateColor(self, event, unit)
 	end
 end
 
-local function Update(self, event, unit, ...)
-    local element = self.Tempest
+local function ScanAuras(self, event, unit, ...)
+	print("ScanAuras", self, event, unit, ...)
+	if (unit ~= self.unit) then return end
+
+	local element = self.Tempest
+	if not element then return end
 	
-	if (unit == self.unit) then
-		if event == "UNIT_AURA" then
-			local updateInfo = ...
+	local asInfo = C_UnitAuras.GetPlayerAuraBySpellID(Auras.AwakeningStorms)
+	element.awakeningStacks = asInfo and asInfo.applications or 0
 
-			-- https://www.wowhead.com/spell=462131/awakening-storms
-			local asInfo = C_UnitAuras.GetPlayerAuraBySpellID(AWAKENING_STORMS)
-			element.awakening_storms = asInfo and asInfo.applications or 0
+	-- https://www.wowhead.com/spell=344179/maelstrom-weapon
+	local mwInfo = C_UnitAuras.GetPlayerAuraBySpellID(Auras.MaelstromWeapon)
+	element.maelstromStacks = mwInfo and mwInfo.applications or 0
+	
+	-- https://www.wowhead.com/spell=454015/tempest
+	local tempestInfo = C_UnitAuras.GetPlayerAuraBySpellID(Auras.Tempest)
+	element.tempestStacks = tempestInfo and tempestInfo.applications or 0
+	element.tempestDuration = tempestInfo and tempestInfo.duration or 0
+	element.tempestExpirationTime = tempestInfo and tempestInfo.expirationTime or 0
+	element.tempestReady = (element.tempestStacks > 0)
+end
 
-			-- https://www.wowhead.com/spell=344179/maelstrom-weapon
-			local mwInfo = C_UnitAuras.GetPlayerAuraBySpellID(MAELSTROM_WEAPON)
-			element.value = mwInfo and mwInfo.applications or 0
-			
-			-- https://www.wowhead.com/spell=454015/tempest
-			local tempestInfo = C_UnitAuras.GetPlayerAuraBySpellID(TEMPEST)
-			element.tempest = tempestInfo and tempestInfo.applications or 0
-		elseif event == "UNIT_SPELLCAST_SUCCEEDED" then
-			local guid, spellID = ...
-			
-			if SPENDERS[spellID] then
-				element.total = element.total - element.value
-				if element.total <= 0 then
-					element.total = element.total + element.threshold
+local function Update(self, event, unit, ...)
+	local element = self.Tempest
+
+	if (event == "COMBAT_LOG_EVENT_UNFILTERED") then
+		local _, subevent, _, sourceGUID, _, _, _, destGUID, destName, _, _, spellID, spellName, _, auraType, amount = CombatLogGetCurrentEventInfo()
+		
+		-- ignore unwanted subevents
+		if not CombatEvents[subevent] then return end
+
+		-- ignore subevents from other units
+		if (sourceGUID and sourceGUID ~= element.guid) then return end
+		
+		local changed = false
+		if subevent == "SPELL_CAST_SUCCESS" then
+			if Spenders[spellID] then
+				if element.maelstromStacks > 0 then
+					element.maelstromSpentTotal = element.maelstromSpentTotal + element.maelstromStacks
+					if element.maelstromSpentTotal >= element.threshold then
+						element.maelstromSpentTotal = math.max(0, element.maelstromSpentTotal - element.threshold)
+					end
+					element.maelstromStacks = 0
 				end
-
-				element.last_update = GetTime()
+			else
+				return
+			end
+		elseif subevent == "SPELL_AURA_APPLIED" then
+			if spellID == Auras.MaelstromWeapon then
+				element.maelstromStacks = amount or 1
+			elseif spellID == Auras.AwakeningStorms then
+				element.awakeningStacks = amount or 1
+			elseif spellID == Auras.Tempest then
+				element.tempestStacks = amount or 1
+				changed = true
+			else
+				return
+			end
+		elseif subevent == "SPELL_AURA_REMOVED" then
+			if spellID == Auras.MaelstromWeapon then
+				element.maelstromStacks = 0
+			elseif spellID == Auras.AwakeningStorms then
+				element.awakeningStacks = 0
+			elseif spellID == Auras.Tempest then
+				element.tempestStacks = 0
+				changed = true
+			else
+				return
+			end
+		elseif subevent == "SPELL_AURA_REFRESH" then
+			if spellID == Auras.MaelstromWeapon then
+				element.maelstromStacks = amount or element.maelstromStacks
+			elseif spellID == Auras.AwakeningStorms then
+				element.awakeningStacks = amount or element.awakeningStacks
+			elseif spellID == Auras.Tempest then
+				element.tempestStacks = amount or element.tempestStacks
+				changed = true
+			else
+				return
+			end
+		elseif subevent == "SPELL_AURA_APPLIED_DOSE" then
+			if spellID == Auras.MaelstromWeapon then
+				element.maelstromStacks = amount or element.maelstromStacks
+			elseif spellID == Auras.AwakeningStorms then
+				element.awakeningStacks = amount or element.awakeningStacks
+			elseif spellID == Auras.Tempest then
+				element.tempestStacks = amount or element.tempestStacks
+				changed = true
+			else
+				return
+			end
+		elseif subevent == "SPELL_AURA_REMOVED_DOSE" then
+			if spellID == Auras.MaelstromWeapon then
+				element.maelstromStacks = amount or math.max(0, element.maelstromStacks - 1)
+			elseif spellID == Auras.AwakeningStorms then
+				element.awakeningStacks = amount or math.max(0, element.awakeningStacks - 1)
+			elseif spellID == Auras.Tempest then
+				element.tempestStacks = amount or math.max(0, element.tempestStacks - 1)
+				changed = true
+			else
+				return
 			end
 		end
+
+		if changed then
+			local tempestInfo = C_UnitAuras.GetPlayerAuraBySpellID(Auras.Tempest)
+			element.tempestDuration = tempestInfo and tempestInfo.duration or 0
+			element.tempestExpirationTime = tempestInfo and tempestInfo.expirationTime or 0
+		end
+	elseif (unit == self.unit) then
+		ScanAuras(self, event, unit, ...)
+	else
+		return
 	end
+
+	element.tempestReady = (element.tempestStacks > 0)
 
 	--[[ Callback: Tempest:PreUpdate()
 	Called before the element has been updated.
@@ -141,7 +242,7 @@ local function Update(self, event, unit, ...)
 	end
 
 	element:SetMinMaxValues(0, element.max)
-	element:SetValue(element.value)
+	element:SetValue(element.maelstromStacks)
 
 	--[[ Callback: Tempest:PostUpdate(cur, max)
 	Called after the element has been updated.
@@ -175,22 +276,23 @@ end
 
 local function Visibility(self, event, unit)
     local element = self.Tempest
-    local spec = GetSpecialization()
-	local isTempestKnown = IsPlayerSpell(454009) -- check Tempest talent
-	if (spec ~= SPEC_SHAMAN_ENHANCEMENT or UnitHasVehiclePlayerFrameUI("player") or not isTempestKnown) then
-		if element:IsShown() then
-			element:Hide()
-			self:UnregisterEvent("UNIT_AURA", Path)
-			self:UnregisterEvent("UNIT_SPELLCAST_SUCCEEDED", Path)
-		end
-	else
+    
+	local spec = GetSpecialization()
+	local visible = (spec == SPEC_SHAMAN_ENHANCEMENT and not UnitHasVehiclePlayerFrameUI("player") and IsPlayerSpell(Talents.Tempest))
+	
+	element.__visible = visible
+
+	if visible then
+		self:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED", Path, true)
 		if not element:IsShown() then
 			element:Show()
-			self:RegisterEvent("UNIT_AURA", Path)
-			self:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED", Path)
 		end
-
 		Path(self, event, unit)
+	else
+		self:UnregisterEvent("COMBAT_LOG_EVENT_UNFILTERED", Path)
+		if element:IsShown() then
+			element:Hide()
+		end
 	end
 end
 
@@ -214,16 +316,20 @@ local function Enable(self, unit)
 	if (element and UnitIsUnit(unit, "player")) then
 		element.__owner = self
 		element.ForceUpdate = ForceUpdate
-		
+
 		-- variables
-        element.guid = UnitGUID("player")
-		element.value = 0					-- current number of 'Maelstorm Weapon' stacks
+		element.guid = UnitGUID("player")
 		element.max = 10					-- maximum number of 'Maelstorm Weapon' stacks
 		element.threshold = 40				-- every 40 'Maelstorm Weapon' stacks spent replaces your next 'Lightning Bold' with 'Tempest'
-		element.total = element.threshold	-- number of stacks of 'Maelstorm Weapon' spend
-		element.tempest = 0					-- current number of 'Tempest' stacks
-		element.last_update = 0
 
+		element.maelstromStacks = 0
+		element.maelstromSpentTotal = 0
+		element.tempestReady = false
+		element.tempestStacks = 0
+		element.awakeningStacks = 0
+		element.awakeningThreshold = 4
+
+		-- Visibility logic: talent/buff based
 		self:RegisterEvent("SPELLS_CHANGED", VisibilityPath, true)
 		self:RegisterEvent("PLAYER_TALENT_UPDATE", VisibilityPath, true)
 
@@ -243,10 +349,9 @@ local function Disable(self)
 	if element then
 		element:Hide()
 
-		self:UnregisterEvent("UNIT_AURA", Path)
-		self:UnregisterEvent("UNIT_SPELLCAST_SUCCEEDED", Path)
 		self:UnregisterEvent("SPELLS_CHANGED", VisibilityPath)
 		self:UnregisterEvent("PLAYER_TALENT_UPDATE", VisibilityPath)
+		self:UnregisterEvent("COMBAT_LOG_EVENT_UNFILTERED", Path)
 	end
 end
 
