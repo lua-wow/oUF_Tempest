@@ -1,6 +1,6 @@
 ## Interface: 110105
 ## Author: Luaerror
-## Version: 1.1.0
+## Version: 1.2.0
 ## Title: oUF Tempest
 ## Notes: Shaman Enhancement Tempest tracker support for oUF layouts.
 ## IconTexture: Interface\ICONS\Inv_ability_stormcallershaman_tempest
