@@ -1,4 +1,4 @@
-## Interface: 110107
+## Interface: 110200
 ## Author: Luaerror
 ## Version: 1.2.0
 ## Title: oUF Tempest

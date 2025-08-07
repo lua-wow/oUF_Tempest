@@ -35,8 +35,6 @@ local oUF = ns.oUF
 -- Blizzard
 local UnitClass = _G.UnitClass
 local UnitGUID = _G.UnitGUID
-local IsSpellKnown = _G.IsSpellKnown
-local IsPlayerSpell = _G.IsPlayerSpell
 
 -- Mine
 local _, class = UnitClass("player")
@@ -277,7 +275,8 @@ local function Visibility(self, event, unit)
     local element = self.Tempest
     
 	local spec = GetSpecialization()
-	local visible = (spec == SPEC_SHAMAN_ENHANCEMENT and not UnitHasVehiclePlayerFrameUI("player") and IsPlayerSpell(Talents.Tempest))
+	local isTempestKnown = C_SpellBook.IsSpellKnown(Talents.Tempest)
+	local visible = (spec == SPEC_SHAMAN_ENHANCEMENT and isTempestKnown and not UnitHasVehiclePlayerFrameUI("player"))
 	
 	element.__visible = visible
 
